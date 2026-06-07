@@ -693,19 +693,35 @@
       -webkit-tap-highlight-color: transparent;
     }
     .shelf-book-back:hover { color: #8a8078; }
+    /* 上位棚（人生テーマ）ラベル */
+    .shelf-book-parent {
+      font-size: 11px;
+      color: var(--text-sub);
+      opacity: 0.7;
+      letter-spacing: 0.04em;
+      margin-bottom: 2px;
+    }
     .shelf-book-title {
       font-size: 20px;
       font-weight: 700;
       color: var(--navy);
       letter-spacing: -0.3px;
     }
+    /* 件数バッジ */
+    .shelf-book-count {
+      font-size: 12px;
+      color: var(--text-sub);
+      font-weight: 400;
+      margin-top: 4px;
+    }
     .shelf-book-empty {
       text-align: center;
-      padding: 48px 24px;
+      padding: 52px 32px 48px;
       color: var(--text-sub);
-      font-size: 14px;
-      line-height: 1.8;
+      font-size: 13px;
+      line-height: 2;
     }
+    .shelf-book-empty svg { opacity: 0.3; margin-bottom: 16px; }
   </style>
 </head>
 <body>
@@ -860,7 +876,12 @@
       <button class="shelf-book-back" id="shelf-book-back-btn" onclick="goBackToShelf()">
         ← 好きの棚
       </button>
+      <!-- 上位棚（人生テーマ）を薄字で表示 -->
+      <div class="shelf-book-parent" id="shelf-book-parent"></div>
+      <!-- 本のタイトル（関心テーマ名）-->
       <div class="shelf-book-title" id="shelf-book-title">テーマ</div>
+      <!-- 該当件数 -->
+      <div class="shelf-book-count" id="shelf-book-count"></div>
     </div>
     <!-- タイムライン（JS で描画） -->
     <div class="timeline-wrap" id="shelf-book-timeline">
@@ -1411,16 +1432,17 @@ function renderShelfPanel() {
 
 /**
  * 本をクリックしたときにテーマ別タイムライン画面へ遷移する
+ * @param {string} bookId - 本のID
  */
 function openShelfBook(bookId) {
   currentBookId = bookId;
   renderShelfBookTimeline(bookId);
 
-  // 画面遷移
+  // 画面遷移（.screen の active を切り替え）
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById('screen-shelf-book').classList.add('active');
 
-  // ナビのactive状態をリセット
+  // ナビのactive状態をリセット（テーマ別タイムライン画面はナビ外）
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
 
   window.scrollTo(0, 0);
@@ -1431,9 +1453,9 @@ function openShelfBook(bookId) {
  */
 function goBackToShelf() {
   goTo('timeline');
-  // 少し待ってから棚パネルを開く
+  // 少し待ってから棚パネルを開いた状態に戻す
   setTimeout(() => {
-    const panel = document.getElementById('shelf-panel');
+    const panel  = document.getElementById('shelf-panel');
     const toggle = document.getElementById('btn-shelf-toggle');
     if (panel && !panel.classList.contains('open')) {
       panel.classList.add('open');
@@ -1443,64 +1465,159 @@ function goBackToShelf() {
   }, 50);
 }
 
+// ============================================================
+// SHELF — RELATED RECORD FILTER
+// ============================================================
+
 /**
- * テーマ別タイムラインを描画する（Future Meなし）
+ * 1件の記録が、指定した本に「関連している」かどうかを判定する。
+ *
+ * 【現在の判定ロジック (v3.3 簡易版)】
+ * 以下の3つを OR でチェックし、いずれかに一致すれば関連あり。
+ *
+ *  1. 本のキーワード配列（book.keywords）との部分一致
+ *     → メモ + URL テキストに各キーワードが含まれるか
+ *
+ *  2. 本タイトル自体との部分一致
+ *     → メモ + URL に本タイトル文字列が含まれるか
+ *     例: 本「日本の伝統布」→ メモ「遠州織を見学した」でも一致しない可能性あり
+ *     ※ 将来の意味検索で補完予定
+ *
+ *  3. futureMeMemory（人生テーマ）との照合
+ *     → 記録が持つ futureMe テキスト内に本タイトルが含まれるか
+ *     （FutureMeが生成したコメントに本名が言及されている場合を想定）
+ *
+ * TODO:
+ *   Gemini APIを利用して、本と記録の「意味的な関連度」を判定する。
+ *   例: 本「日本の伝統布」← 記録「福岡県ではんてん作りを見学」のような
+ *   キーワード一致がなくても意味的に近いケースを拾えるようにする。
+ *   将来は写真解析（Gemini Vision API）も利用して、
+ *   画像の内容から関連テーマを判定する。
+ *
+ * @param {object} record    - 記録データ
+ * @param {object} book      - 本データ { id, title, keywords }
+ * @returns {boolean}
+ */
+function isRecordRelatedToBook(record, book) {
+  const text = (
+    (record.memo || '') + ' ' + (record.url || '')
+  ).toLowerCase();
+
+  // ① 本のキーワード配列との部分一致
+  if (Array.isArray(book.keywords)) {
+    for (const kw of book.keywords) {
+      if (kw && text.includes(kw.toLowerCase())) return true;
+    }
+  }
+
+  // ② 本タイトル自体との部分一致
+  if (book.title && text.includes(book.title.toLowerCase())) return true;
+
+  // ③ FutureMeコメント内に本タイトルが含まれるか
+  //    （FutureMeがテーマ名に言及している場合に対応）
+  if (book.title && record.futureMe) {
+    const fmText = record.futureMe.toLowerCase();
+    if (fmText.includes(book.title.toLowerCase())) return true;
+  }
+
+  // TODO: ④ 将来拡張 — Gemini意味検索による関連判定
+  //   await checkSemanticRelevance(record, book) のような非同期APIを呼び出し
+  //   スコアが閾値以上の場合に関連ありとする。
+  //   relatedThemes を localStorage に保存せず、表示時のみ判定する方針は維持する。
+
+  return false;
+}
+
+/**
+ * テーマ別タイムラインを描画する
+ * - Future Meコメントは表示しない（「思い出す場所」として設計）
+ * - localStorageの構造は変更しない
+ * - 表示時のみリアルタイムフィルタリングを行う
+ *
+ * @param {string} bookId - 本のID
  */
 function renderShelfBookTimeline(bookId) {
-  // 本データを取得
+  // ── 本データ＆上位棚データを取得 ─────────────────────────────
   const shelf = getShelf();
-  let targetBook = null;
+  let targetBook  = null;
+  let parentShelf = null;
+
   for (const shelfItem of shelf) {
     for (const book of (shelfItem.books || [])) {
-      if (book.id === bookId) { targetBook = book; break; }
+      if (book.id === bookId) {
+        targetBook  = book;
+        parentShelf = shelfItem;
+        break;
+      }
     }
     if (targetBook) break;
   }
   if (!targetBook) return;
 
-  // ヘッダータイトルを更新
-  const titleEl = document.getElementById('shelf-book-title');
-  if (titleEl) titleEl.textContent = targetBook.title;
+  // ── ヘッダーを更新 ───────────────────────────────────────────
+  const parentEl = document.getElementById('shelf-book-parent');
+  const titleEl  = document.getElementById('shelf-book-title');
+  const countEl  = document.getElementById('shelf-book-count');
 
-  // タイムライン描画
+  // 上位棚（人生テーマ）を薄字で表示
+  if (parentEl) parentEl.textContent = parentShelf ? parentShelf.title : '';
+  // 本タイトル（関心テーマ名）
+  if (titleEl)  titleEl.textContent  = targetBook.title;
+
+  // ── タイムラインコンテナをクリア ─────────────────────────────
   const container = document.getElementById('shelf-book-timeline');
   if (!container) return;
 
-  // 既存アイテムをクリア（timeline-lineは保持）
   Array.from(container.children).forEach(el => {
     if (!el.classList.contains('timeline-line')) el.remove();
   });
 
+  // ── 関連記録を抽出（localStorage構造は変更しない） ──────────
+  // isRecordRelatedToBook() でリアルタイム判定する
   const records = loadRecords();
-  const matched = records.filter(r => {
-    const text = ((r.memo || '') + ' ' + (r.url || '')).toLowerCase();
-    return targetBook.keywords.some(kw => text.includes(kw.toLowerCase()));
-  });
+  const matched = records.filter(r => isRecordRelatedToBook(r, targetBook));
 
+  // 件数を表示
+  if (countEl) {
+    countEl.textContent = matched.length > 0
+      ? matched.length + '件の記録'
+      : '';
+  }
+
+  // ── 空状態の表示 ─────────────────────────────────────────────
   if (matched.length === 0) {
     const emptyEl = document.createElement('div');
     emptyEl.className = 'shelf-book-empty';
-    emptyEl.textContent = 'まだ記録がありません。\nこのテーマに関係するキーワードを含む\n記録を残していくと、ここに表示されます。';
+    emptyEl.innerHTML = `
+      <svg width="40" height="48" viewBox="0 0 40 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="2" y="2" width="36" height="44" rx="3" stroke="#10243f" stroke-width="1.5"/>
+        <line x1="10" y1="14" x2="30" y2="14" stroke="#10243f" stroke-width="1.2"/>
+        <line x1="10" y1="20" x2="26" y2="20" stroke="#10243f" stroke-width="1.2"/>
+        <line x1="10" y1="26" x2="22" y2="26" stroke="#10243f" stroke-width="1.2"/>
+      </svg>
+      <p>まだ記録がありません。<br/>このテーマに関係する記録を<br/>残していくと、ここに表示されます。</p>
+    `;
     container.appendChild(emptyEl);
     return;
   }
 
-  const FUTURE_COLORS_LOCAL = ['yellow', 'blue', 'purple'];
-  matched.forEach((rec, idx) => {
-    const dateObj = rec.date ? new Date(rec.date + 'T00:00:00') : new Date();
-    const year    = dateObj.getFullYear();
-    const month   = String(dateObj.getMonth()+1).padStart(2,'0');
-    const day     = String(dateObj.getDate()).padStart(2,'0');
-    const weekdays = ['日','月','火','水','木','金','土'];
-    const wday    = weekdays[dateObj.getDay()];
+  // ── タイムラインカードを描画 ─────────────────────────────────
+  // Future Meコメントは表示しない（テーマ別TLは「思い出す場所」として設計）
+  matched.forEach(rec => {
+    const dateObj  = rec.date ? new Date(rec.date + 'T00:00:00') : new Date();
+    const year     = dateObj.getFullYear();
+    const month    = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const day      = String(dateObj.getDate()).padStart(2, '0');
+    const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+    const wday     = weekdays[dateObj.getDay()];
 
-    let photoHtml = rec.photo
+    const photoHtml = rec.photo
       ? `<img class="tl-card-photo" src="${escHtml(rec.photo)}" alt="記録写真" loading="lazy" />`
       : '';
-    let urlHtml = rec.url
+    const urlHtml = rec.url
       ? `<div class="tl-card-url"><a href="${escHtml(rec.url)}" target="_blank" rel="noopener">🔗 ${escHtml(rec.url)}</a></div>`
       : '';
-    let memoHtml = rec.memo
+    const memoHtml = rec.memo
       ? `<div class="tl-card-memo">${escHtml(rec.memo)}</div>`
       : '';
 
