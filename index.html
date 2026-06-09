@@ -626,10 +626,11 @@
       font-size: 12px;
       font-weight: 700;
       color: var(--navy);
-      opacity: 0.6;
+      opacity: 0.8;
       letter-spacing: 0.03em;
-      margin-bottom: 3px;
-      padding: 0 2px;
+      margin-bottom: 6px;
+      padding: 0 2px 4px;
+      border-bottom: 1px solid var(--border);
     }
 
     /* 本（関心テーマ） */
@@ -641,7 +642,7 @@
       display: flex;
       align-items: baseline;
       justify-content: space-between;
-      padding: 3px 6px;
+      padding: 2px 6px;
       border-radius: 6px;
       cursor: pointer;
       transition: background 0.15s;
@@ -651,17 +652,55 @@
     .book-item:hover { background: rgba(255,92,147,0.06); }
     .book-item:active { background: rgba(255,92,147,0.12); }
     .book-title {
-      font-size: 14px;
-      color: var(--navy);
-      font-weight: 500;
+      font-size: 13px;
+      color: var(--text-sub);
+      font-weight: 400;
       letter-spacing: 0.01em;
     }
     .book-count {
-      font-size: 14px;
+      font-size: 13px;
       color: var(--text-sub);
       font-weight: 400;
       margin-left: 12px;
       flex-shrink: 0;
+    }
+
+    /* ===== あのころ（時間軸ナビ） ===== */
+    .anokoro-year {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--navy);
+      margin-bottom: 8px;
+      margin-top: 14px;
+      padding: 0 4px;
+    }
+    .anokoro-year:first-child {
+      margin-top: 4px;
+    }
+    .anokoro-months {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+      padding: 0 4px;
+    }
+    .anokoro-month {
+      font-size: 13px;
+      color: #d1cbc3;
+      width: 26px;
+      height: 26px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      cursor: default;
+    }
+    .anokoro-month.has-record {
+      color: var(--pink);
+      background: transparent;
+      border: 1px solid var(--pink);
+      cursor: pointer;
+      font-weight: 600;
     }
 
     /* 棚区切り */
@@ -796,17 +835,29 @@
       </div>
     </header>
 
-    <!-- TIMELINE LABEL + 好きの棚トグル -->
+    <!-- TIMELINE LABEL + トグル -->
     <div class="section-label-row">
       <span class="section-label">タイムライン</span>
-      <button class="btn-memory-toggle" id="btn-shelf-toggle" onclick="toggleShelfPanel()">
-        好きの棚 ▼
-      </button>
+      <div style="display: flex; gap: 20px;">
+        <button class="btn-memory-toggle" id="btn-shelf-toggle" onclick="toggleShelfPanel()">
+          好きの棚 ▼
+        </button>
+        <button class="btn-memory-toggle" id="btn-anokoro-toggle" onclick="toggleAnokoroPanel()">
+          あのころ ▼
+        </button>
+      </div>
     </div>
 
     <!-- 好きの棚アコーディオン（初期：閉じる）-->
     <div class="shelf-panel" id="shelf-panel">
       <div class="shelf-panel-inner" id="shelf-panel-inner">
+        <!-- JS で描画 -->
+      </div>
+    </div>
+
+    <!-- あのころアコーディオン（初期：閉じる）-->
+    <div class="shelf-panel" id="anokoro-panel">
+      <div class="shelf-panel-inner" id="anokoro-panel-inner">
         <!-- JS で描画 -->
       </div>
     </div>
@@ -917,6 +968,20 @@
       <div class="timeline-line"></div>
     </div>
   </div><!-- /screen-shelf-book -->
+
+  <!-- ========== SCREEN: ANOKORO MONTH (あのころ 記録一覧) ========== -->
+  <div id="screen-anokoro-month" class="screen">
+    <div class="shelf-book-header">
+      <button class="shelf-book-back" onclick="goBackToAnokoro()">
+        ← あのころ
+      </button>
+      <div class="shelf-book-title" id="anokoro-month-title"></div>
+      <div class="shelf-book-count" id="anokoro-month-count"></div>
+    </div>
+    <div class="timeline-wrap" id="anokoro-month-timeline">
+      <div class="timeline-line"></div>
+    </div>
+  </div><!-- /screen-anokoro-month -->
 
   <!-- ========== SCREEN: SETTINGS ========== -->
 
@@ -1406,7 +1471,7 @@ async function reorganizeShelf() {
 }
 
 // ============================================================
-// SHELF — PANEL TOGGLE
+// SHELF & ANOKORO — PANEL TOGGLE
 // ============================================================
 
 /**
@@ -1421,6 +1486,20 @@ function toggleShelfPanel() {
   toggle.textContent = isOpen ? '好きの棚 ▲' : '好きの棚 ▼';
 
   if (isOpen) renderShelfPanel();
+}
+
+/**
+ * あのころパネルを開閉する
+ */
+function toggleAnokoroPanel() {
+  const panel  = document.getElementById('anokoro-panel');
+  const toggle = document.getElementById('btn-anokoro-toggle');
+  if (!panel || !toggle) return;
+
+  const isOpen = panel.classList.toggle('open');
+  toggle.textContent = isOpen ? 'あのころ ▲' : 'あのころ ▼';
+
+  if (isOpen) renderAnokoroPanel();
 }
 
 // ============================================================
@@ -1764,6 +1843,136 @@ function renderShelfBookTimeline(book) {
     `;
     container.appendChild(item);
   });
+}
+
+// ============================================================
+// ANOKORO — RENDER & MONTH TIMELINE
+// ============================================================
+
+/**
+ * あのころパネルを描画する
+ */
+function renderAnokoroPanel() {
+  const inner = document.getElementById('anokoro-panel-inner');
+  if (!inner) return;
+  inner.innerHTML = '';
+
+  const records = loadRecords();
+  const recordMonths = new Set();
+  records.forEach(r => {
+    if (r.date) {
+      recordMonths.add(r.date.slice(0, 7)); // YYYY-MM
+    }
+  });
+
+  const currentYear = new Date().getFullYear();
+  // 過去5年分
+  for (let y = currentYear; y > currentYear - 5; y--) {
+    const yearEl = document.createElement('div');
+    yearEl.className = 'anokoro-year';
+    yearEl.textContent = y;
+
+    const monthsEl = document.createElement('div');
+    monthsEl.className = 'anokoro-months';
+
+    for (let m = 1; m <= 12; m++) {
+      const monthStr = String(m).padStart(2, '0');
+      const key = `${y}-${monthStr}`;
+      const hasRecord = recordMonths.has(key);
+
+      const mEl = document.createElement('div');
+      mEl.className = 'anokoro-month' + (hasRecord ? ' has-record' : '');
+      mEl.textContent = m;
+
+      if (hasRecord) {
+        mEl.onclick = () => openAnokoroMonth(y, m);
+      }
+      monthsEl.appendChild(mEl);
+    }
+
+    inner.appendChild(yearEl);
+    inner.appendChild(monthsEl);
+  }
+}
+
+/**
+ * 月をクリックしたときにあのころ月別タイムラインへ遷移する
+ */
+function openAnokoroMonth(year, month) {
+  const monthStr = String(month).padStart(2, '0');
+  const prefix = `${year}-${monthStr}`;
+  const records = loadRecords().filter(r => r.date && r.date.startsWith(prefix));
+
+  const titleEl = document.getElementById('anokoro-month-title');
+  const countEl = document.getElementById('anokoro-month-count');
+  const container = document.getElementById('anokoro-month-timeline');
+
+  if (titleEl) titleEl.textContent = `${year}年 ${month}月`;
+  if (countEl) countEl.textContent = records.length + '件の記録';
+
+  if (!container) return;
+  Array.from(container.children).forEach(el => {
+    if (!el.classList.contains('timeline-line')) el.remove();
+  });
+
+  records.forEach(rec => {
+    const dateObj  = rec.date ? new Date(rec.date + 'T00:00:00') : new Date();
+    const rYear    = dateObj.getFullYear();
+    const rMonth   = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const day      = String(dateObj.getDate()).padStart(2, '0');
+    const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+    const wday     = weekdays[dateObj.getDay()];
+
+    const photoHtml = rec.photo ? `<img class="tl-card-photo" src="${escHtml(rec.photo)}" alt="記録写真" loading="lazy" />` : '';
+    const urlHtml = rec.url ? `<div class="tl-card-url"><a href="${escHtml(rec.url)}" target="_blank" rel="noopener">🔗 ${escHtml(rec.url)}</a></div>` : '';
+    const memoHtml = rec.memo ? `<div class="tl-card-memo">${escHtml(rec.memo)}</div>` : '';
+
+    let metaHtml = '';
+    if (rec.photo) metaHtml += `<span class="tl-meta-item"><svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="#7a6e63" stroke-width="1.2"><rect x="1" y="2.5" width="12" height="9.5" rx="1.5"/><circle cx="7" cy="7.5" r="2"/></svg>写真</span>`;
+    if (rec.url)   metaHtml += `<span class="tl-meta-item"><svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="#7a6e63" stroke-width="1.2"><path d="M5.5 8.5L8.5 5.5"/><path d="M3.5 7.5L2 9a2.12 2.12 0 0 0 3 3l1.5-1.5"/><path d="M7.5 6.5L9 5a2.12 2.12 0 0 0-3-3L4.5 3.5"/></svg>URL</span>`;
+    if (rec.memo)  metaHtml += `<span class="tl-meta-item"><svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="#7a6e63" stroke-width="1.2"><path d="M3 11L2 12l1-4 8-8 3 3-8 8z"/></svg>メモ</span>`;
+
+    const item = document.createElement('div');
+    item.className = 'timeline-item';
+    item.innerHTML = `
+      <div class="timeline-dot"></div>
+      <div class="timeline-date">
+        <div class="year">${rYear}</div>
+        <div class="day">${rMonth}/${day}<span class="weekday">${wday}</span></div>
+      </div>
+      <div class="tl-card">
+        ${photoHtml}
+        <div class="tl-card-body">
+          ${metaHtml ? `<div class="tl-card-meta">${metaHtml}</div>` : ''}
+          ${memoHtml}
+          ${urlHtml}
+        </div>
+      </div>
+    `;
+    container.appendChild(item);
+  });
+
+  // 画面遷移
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById('screen-anokoro-month').classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  window.scrollTo(0, 0);
+}
+
+/**
+ * あのころに戻る
+ */
+function goBackToAnokoro() {
+  goTo('timeline');
+  setTimeout(() => {
+    const panel  = document.getElementById('anokoro-panel');
+    const toggle = document.getElementById('btn-anokoro-toggle');
+    if (panel && !panel.classList.contains('open')) {
+      panel.classList.add('open');
+      if (toggle) toggle.textContent = 'あのころ ▲';
+      renderAnokoroPanel();
+    }
+  }, 50);
 }
 
 // ============================================================
