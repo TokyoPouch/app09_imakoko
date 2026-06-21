@@ -1988,18 +1988,7 @@ async function reorganizeShelf() {
   if (btn) { btn.disabled = true; btn.textContent = '整理中…'; }
 
   const allRecords = loadRecords();
-
-  // futureMeMemory から人生テーマ（棚の名前）を取得
-  const rawMemory = loadMemory();
-  const themes = rawMemory
-    .map(t => (typeof t === 'string' ? t : (t && t.theme ? t.theme : '')))
-    .filter(Boolean);
-
-  if (themes.length === 0) {
-    showToast('まず「記憶を整理する」を実行してください');
-    if (btn) { btn.disabled = false; btn.textContent = '棚を再整理'; }
-    return;
-  }
+  const isFileProtocol = window.location.protocol === 'file:';
 
   // 送信エントリー（画像Base64は除外・直近50件）
   const entries = allRecords.slice(0, 50).map(r => ({
@@ -2013,7 +2002,39 @@ async function reorganizeShelf() {
     tags:           Array.isArray(r.tags) ? r.tags : [],
   }));
 
-  const isFileProtocol = window.location.protocol === 'file:';
+  // ── STEP 0: futureMeMemory が空なら /api/organize-memory で自動生成 ──
+  let themes = loadMemory()
+    .map(t => (typeof t === 'string' ? t : (t && t.theme ? t.theme : '')))
+    .filter(Boolean);
+
+  if (themes.length === 0 && !isFileProtocol) {
+    try {
+      const resM = await fetch('/api/organize-memory', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          currentMemory: [],
+          recentEntries: entries.slice(0, 10),
+        })
+      });
+      if (!resM.ok) throw new Error('HTTP ' + resM.status);
+      const dataM = await resM.json();
+
+      if (Array.isArray(dataM.themes) && dataM.themes.length > 0) {
+        themes = dataM.themes;
+        saveMemory(themes);
+        console.log('[memory-auto-generated]', themes);
+      }
+    } catch (err) {
+      console.warn('[reorganizeShelf] organize-memory自動生成失敗:', err.message || err);
+    }
+  }
+
+  if (themes.length === 0) {
+    showToast('記録が少なすぎて棚を生成できませんでした');
+    if (btn) { btn.disabled = false; btn.textContent = '棚を再整理'; }
+    return;
+  }
 
   // ── STEP 1: /api/generate-books → imakokoShelf を生成 ────────
   let newShelf = [];
