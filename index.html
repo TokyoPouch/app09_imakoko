@@ -946,6 +946,100 @@
       text-align: center;
       padding: 4px 8px;
     }
+
+    /* ===== 深掘り質問セクション（Future Meボックス代替） ===== */
+    .fm-question-section {
+      background: var(--yellow-pale);
+      border: 1px solid #f0e4a0;
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-top: 8px;
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+    }
+    .fm-question-section-content { flex: 1; }
+    .fm-question-section-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--pink);
+      letter-spacing: 0.1em;
+      margin-bottom: 4px;
+    }
+
+    /* ===== 深掘り質問エリア ===== */
+    .fm-question-wrap {
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(0,0,0,0.07);
+    }
+    .fm-question-text {
+      font-size: 13px;
+      color: var(--navy);
+      line-height: 1.6;
+      margin-bottom: 8px;
+    }
+    .fm-answer-input {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 13px;
+      font-family: 'Noto Sans JP', sans-serif;
+      background: rgba(255,255,255,0.8);
+      color: var(--navy);
+      resize: none;
+      outline: none;
+      min-height: 54px;
+      transition: border-color 0.2s;
+    }
+    .fm-answer-input:focus { border-color: var(--pink); }
+    .fm-answer-submit {
+      margin-top: 6px;
+      background: none;
+      border: 1px solid rgba(255,92,147,0.5);
+      border-radius: 16px;
+      padding: 4px 14px;
+      font-size: 12px;
+      font-family: 'Noto Sans JP', sans-serif;
+      color: var(--pink);
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .fm-answer-submit:hover { background: rgba(255,92,147,0.08); }
+
+    /* ===== 会話ありバッジ ===== */
+    .fm-conversation-badge {
+      display: block;
+      font-size: 11px;
+      color: var(--text-sub);
+      margin-top: 8px;
+      cursor: pointer;
+      background: none;
+      border: none;
+      padding: 0;
+      font-family: 'Noto Sans JP', sans-serif;
+      text-align: left;
+      opacity: 0.75;
+      transition: opacity 0.15s;
+      letter-spacing: 0.02em;
+    }
+    .fm-conversation-badge:hover { opacity: 1; }
+
+    /* ===== 会話詳細（展開） ===== */
+    .fm-conversation-detail {
+      display: none;
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--text-sub);
+      background: rgba(255,255,255,0.6);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      line-height: 1.8;
+    }
+    .fm-conversation-detail.open { display: block; }
+    .fm-conv-role { font-weight: 700; color: var(--navy); margin-right: 4px; }
   </style>
 </head>
 <body>
@@ -1369,12 +1463,17 @@ function loadRecords() {
   } catch(e) { return []; }
 }
 function saveRecords(records) {
+  const json = JSON.stringify(records);
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+    localStorage.setItem(STORAGE_KEY, json);
+    // 容量確認ログ（文字数 × 2バイト概算）
+    const usedKB = Math.round(json.length * 2 / 1024);
+    console.log(`[localStorage] imakoko_records: ${usedKB}KB`);
     return true;
   } catch(e) {
-    console.error('localStorage 保存失敗:', e);
-    return false;
+    const isQuota = e.name === 'QuotaExceededError' || e.code === 22;
+    console.error('[localStorage] 保存失敗 quota=' + isQuota + ':', e);
+    return isQuota ? 'quota' : false;
   }
 }
 
@@ -1403,8 +1502,8 @@ function saveFeedback(feedback) {
 // ============================================================
 const ACCEPTED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
 const HEIC_TYPES = ['image/heic', 'image/heif'];
-const MAX_WIDTH = 1200;
-const JPEG_QUALITY = 0.8;
+const MAX_LONG_SIDE = 600;   // 長辺の最大ピクセル数
+const JPEG_QUALITY = 0.3;    // JPEG品質（容量最小化）
 
 function handlePhotoSelect(input) {
   const file = input.files[0];
@@ -1442,12 +1541,13 @@ function handlePhotoSelect(input) {
   reader.onload = function(e) {
     const img = new Image();
     img.onload = function() {
-      // リサイズ計算
+      // 長辺基準でリサイズ（縦横どちらでも対応）
       let w = img.width;
       let h = img.height;
-      if (w > MAX_WIDTH) {
-        h = Math.round(h * MAX_WIDTH / w);
-        w = MAX_WIDTH;
+      const scale = Math.min(1, MAX_LONG_SIDE / Math.max(w, h));
+      if (scale < 1) {
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
       }
 
       const canvas = document.createElement('canvas');
@@ -1456,7 +1556,7 @@ function handlePhotoSelect(input) {
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0, w, h);
 
-      // JPEG に変換して保存
+      // JPEG に変換して保存（強めの圧縮）
       photoDataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
 
       const preview = document.getElementById('photo-preview');
@@ -1499,14 +1599,18 @@ function saveRecord() {
 
   const records = loadRecords();
   records.unshift(record);
+  console.log('[photo-size]', record.photo ? record.photo.length : 0);
+  console.log('[records-size-before-save]', JSON.stringify(records).length);
   const saved = saveRecords(records);
 
-  if (!saved) {
-    // 保存失敗 → エラーメッセージ表示
+  if (saved !== true) {
     const errMsg = document.getElementById('save-error');
+    errMsg.textContent = saved === 'quota'
+      ? '⚠️ 保存容量がいっぱいです。写真付き記録を減らすか、データを書き出して整理してください。'
+      : '⚠️ 保存に失敗しました。古い記録を削除してください。';
     errMsg.classList.add('show');
-    setTimeout(() => errMsg.classList.remove('show'), 4000);
-    showToast('⚠️ 保存に失敗しました');
+    setTimeout(() => errMsg.classList.remove('show'), 5000);
+    showToast('⚠️ 保存できませんでした');
     return;
   }
 
@@ -1550,6 +1654,20 @@ function generateFutureMe(record) {
   if (month >= 6 && month <= 8)  return 'あの夏の日のこと、覚えていますか？\n今年の夏は、何か新しいことを始めてみましたか？';
   if (month >= 9 && month <= 11) return 'この秋の記録を今見ると、何を思い出しますか？\nあの頃と今で、変わったことはありますか？';
   return 'この記録を今見ると、何を思い出しますか？\n過去の自分から、今の自分へ一言届けましょう。';
+}
+
+// ローカルフォールバック用：記録内容から深掘り質問を生成する
+function generateQuestion(rec) {
+  const text = ((rec.memo || '') + ' ' + (rec.url || '')).toLowerCase();
+  if (/旅行|旅|観光|温泉|景色|場所/.test(text)) return 'また行きたいと思いましたか？';
+  if (/友|出会い|会った|会い|イベント|展示/.test(text)) return 'その場の空気、どんな感じでしたか？';
+  if (/音楽|ライブ|コンサート|曲|歌|アルバム/.test(text)) return 'どんな気持ちで聴いていましたか？';
+  if (/映画|ドラマ|アニメ|マンガ|漫画/.test(text)) return '印象に残っているシーンはありますか？';
+  if (/アイデア|企画|やりたい|したい|構想/.test(text)) return 'そのアイデア、今も温めていますか？';
+  if (/食事|カフェ|レストラン|料理|ごはん/.test(text)) return 'また行きたいと思いましたか？';
+  if (rec.photo && !rec.memo && !rec.url) return 'この写真を見て、何を思い出しますか？';
+  if (rec.url && !rec.memo) return 'このURL、今も気になっていますか？';
+  return 'どんな気持ちでしたか？';
 }
 
 // ============================================================
@@ -1631,11 +1749,12 @@ async function reorganizeShelf() {
 
   // 送信するエントリー（画像Base64は送らない・直近50件）
   const entries = allRecords.slice(0, 50).map(r => ({
-    id:        String(r.id),
-    date:      r.date   || '',
-    memo:      r.memo   || '',
-    url:       r.url    || '',
-    futureMe:  r.futureMe || ''
+    id:             String(r.id),
+    date:           r.date           || '',
+    memo:           r.memo           || '',
+    url:            r.url            || '',
+    futureMe:       r.futureMe       || '',
+    futureMeAnswer: r.futureMeAnswer || '',
   }));
 
   // file:// 環境ではローカルフォールバックのみ
@@ -2545,6 +2664,20 @@ function renderTimeline() {
     if (rec.url)   metaHtml += `<span class="tl-meta-item"><svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="#7a6e63" stroke-width="1.2"><path d="M5.5 8.5L8.5 5.5"/><path d="M3.5 7.5L2 9a2.12 2.12 0 0 0 3 3l1.5-1.5"/><path d="M7.5 6.5L9 5a2.12 2.12 0 0 0-3-3L4.5 3.5"/></svg>URL</span>`;
     if (rec.memo)  metaHtml += `<span class="tl-meta-item"><svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="#7a6e63" stroke-width="1.2"><path d="M3 11L2 12l1-4 8-8 3 3-8 8z"/></svg>メモ</span>`;
 
+    // 会話バッジHTML（回答済みの場合のみ）
+    const conversationBadgeHtml = rec.futureMeAnswer
+      ? `<button class="fm-conversation-badge" onclick="toggleConversation(${rec.id})">💬 Future Meとの会話あり</button>
+         <div class="fm-conversation-detail" id="fm-conv-${rec.id}">
+           <div><span class="fm-conv-role">Future Me：</span>${escHtml(rec.futureMe || '')}</div>
+           ${rec.futureMeQuestion ? `<div><span class="fm-conv-role">Q：</span>${escHtml(rec.futureMeQuestion)}</div>` : ''}
+           <div><span class="fm-conv-role">あなた：</span>${escHtml(rec.futureMeAnswer)}</div>
+         </div>`
+      : '';
+
+    // futureMeQuestion または futureMeAnswer がある場合は黄色ボックスを非表示
+    const hasConversation = !!(rec.futureMeQuestion || rec.futureMeAnswer);
+    const fmBoxStyle = hasConversation ? 'display:none' : '';
+
     item.innerHTML = `
       <div class="timeline-dot"></div>
       <div class="timeline-date">
@@ -2558,24 +2691,27 @@ function renderTimeline() {
           ${memoHtml}
           ${locationHtml}
           ${urlHtml}
+          ${conversationBadgeHtml}
         </div>
       </div>
-      <div class="future-me-box ${colorClass}">
+      <div class="future-me-box ${colorClass}" id="fm-box-${rec.id}" style="${fmBoxStyle}">
         <div class="future-me-avatar">${FUTURE_ME_SVG}</div>
         <div class="future-me-content" id="fm-content-${rec.id}">
           <div class="future-me-label">Future Meからのメッセージ</div>
           <div class="future-me-text" id="fm-text-${rec.id}">${escHtml(fmText).replace(/\n/g,'<br/>')}</div>
         </div>
       </div>
+      <div id="fm-question-section-${rec.id}"></div>
     `;
 
     container.appendChild(item);
 
-    // フィードバックUIを追加
-    const fmContentEl = item.querySelector('#fm-content-' + rec.id);
-    if (fmContentEl) renderFeedbackUI(rec.id, fmContentEl);
+    // 深掘り質問UIを追加（質問あり・未回答・ロード完了済みの場合）
+    if (rec.futureMeQuestion && !rec.futureMeAnswer && !isLoading) {
+      renderFutureMeQuestion(rec.id);
+    }
 
-    // STEP3: ローディング中のカードはAPIを非同期呼び出し
+    // ローディング中のカードはAPIを非同期呼び出し
     if (isLoading) fetchAndUpdateFutureMe(rec.id);
   });
 }
@@ -2593,14 +2729,9 @@ async function fetchAndUpdateFutureMe(recordId) {
   const rec = allRecords.find(r => r.id === recordId);
   if (!rec) return;
 
-  // 直近10件（自分自身を除く）を recentEntries として送る（画像Base64は送らない）
-  const recentEntries = allRecords
-    .filter(r => r.id !== recordId)
-    .slice(0, 10)
-    .map(r => ({ date: r.date, memo: r.memo, url: r.url }));
-
-  // 人生テーマメモリーを取得
-  const memoryThemes = loadMemory().map(t => ({ theme: t.theme, strength: t.strength || 1 }));
+  // 人生テーマメモリーを取得（文字列配列に対応）
+  const rawMemory = loadMemory();
+  const memoryThemes = rawMemory.map(t => typeof t === 'string' ? t : (t && t.theme ? t.theme : '')).filter(Boolean);
 
   const textEl = document.getElementById('fm-text-' + recordId);
 
@@ -2609,9 +2740,8 @@ async function fetchAndUpdateFutureMe(recordId) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        currentEntry: { date: rec.date, memo: rec.memo, url: rec.url },
-        recentEntries,
-        memoryThemes
+        currentEntry: { date: rec.date, memo: rec.memo, url: rec.url, location: rec.location },
+        memoryThemes,
       })
     });
 
@@ -2619,34 +2749,136 @@ async function fetchAndUpdateFutureMe(recordId) {
     const data = await res.json();
     if (!data.comment) throw new Error('No comment in response');
 
-    // localStorage を更新（futureMeLoading削除、futureMe保存）
+    // localStorage を更新（comment + question を保存）
     const records = loadRecords();
     const i = records.findIndex(r => r.id === recordId);
     if (i !== -1) {
       records[i].futureMe = data.comment;
+      if (data.question) records[i].futureMeQuestion = data.question;
       delete records[i].futureMeLoading;
       saveRecords(records);
     }
 
-    // DOM を更新
+    // DOM を更新：コメントテキスト（ボックスがまだ見えている間に更新）
     if (textEl) textEl.innerHTML = escHtml(data.comment).replace(/\n/g, '<br/>');
+
+    // 質問がある場合：黄色ボックスを隠して質問セクションを表示
+    if (data.question) {
+      const fmBox = document.getElementById('fm-box-' + recordId);
+      if (fmBox) fmBox.style.display = 'none';
+      renderFutureMeQuestion(recordId);
+    }
 
   } catch (err) {
     console.warn('Future Me API fallback:', err.message || err);
 
-    // フォールバック: 既存キーワードロジックを使用
-    const fallback = generateFutureMe(rec);
-
-    const records = loadRecords();
-    const i = records.findIndex(r => r.id === recordId);
+    const fallback   = generateFutureMe(rec);
+    const fallbackQ  = generateQuestion(rec);
+    const records    = loadRecords();
+    const i          = records.findIndex(r => r.id === recordId);
     if (i !== -1) {
-      records[i].futureMe = fallback;
+      records[i].futureMe         = fallback;
+      records[i].futureMeQuestion = fallbackQ;
       delete records[i].futureMeLoading;
       saveRecords(records);
     }
 
     if (textEl) textEl.innerHTML = escHtml(fallback).replace(/\n/g, '<br/>');
+
+    // フォールバック時も黄色ボックスを隠して質問セクションを表示
+    const fmBox = document.getElementById('fm-box-' + recordId);
+    if (fmBox) fmBox.style.display = 'none';
+    renderFutureMeQuestion(recordId);
   }
+}
+
+// ============================================================
+// STEP1: 深掘り質問 UI
+// ============================================================
+
+/**
+ * 深掘り質問と回答入力欄を専用セクションに描画する
+ * Future Meボックスの代わりとして表示（重複なし）
+ */
+function renderFutureMeQuestion(recordId) {
+  const sectionEl = document.getElementById('fm-question-section-' + recordId);
+  if (!sectionEl || sectionEl.children.length > 0) return;
+
+  const records = loadRecords();
+  const rec = records.find(r => r.id === recordId);
+  if (!rec || !rec.futureMeQuestion || rec.futureMeAnswer) return;
+
+  // 外枠（黄色ボックスと同じスタイル）
+  const outer = document.createElement('div');
+  outer.className = 'fm-question-section';
+
+  const avatar = document.createElement('div');
+  avatar.className = 'future-me-avatar';
+  avatar.innerHTML = FUTURE_ME_SVG;
+
+  const content = document.createElement('div');
+  content.className = 'fm-question-section-content';
+
+  const label = document.createElement('div');
+  label.className = 'fm-question-section-label';
+  label.textContent = 'FUTURE ME';
+
+  const wrap = document.createElement('div');
+  wrap.className = 'fm-question-wrap';
+  wrap.id = 'fm-question-wrap-' + recordId;
+
+  const qEl = document.createElement('div');
+  qEl.className = 'fm-question-text';
+  qEl.textContent = rec.futureMeQuestion;
+
+  const input = document.createElement('textarea');
+  input.className = 'fm-answer-input';
+  input.id = 'fm-answer-input-' + recordId;
+  input.placeholder = 'ここに返事を書く…';
+  input.rows = 2;
+
+  const submitBtn = document.createElement('button');
+  submitBtn.className = 'fm-answer-submit';
+  submitBtn.textContent = '送る';
+  submitBtn.onclick = () => submitFutureMeAnswer(recordId);
+
+  wrap.appendChild(qEl);
+  wrap.appendChild(input);
+  wrap.appendChild(submitBtn);
+  content.appendChild(label);
+  content.appendChild(wrap);
+  outer.appendChild(avatar);
+  outer.appendChild(content);
+  sectionEl.appendChild(outer);
+}
+
+/**
+ * 深掘り質問への回答を保存してタイムラインを再描画する
+ */
+function submitFutureMeAnswer(recordId) {
+  const inputEl = document.getElementById('fm-answer-input-' + recordId);
+  if (!inputEl) return;
+  const answer = inputEl.value.trim();
+  if (!answer) { showToast('返事を入力してください'); return; }
+
+  const records = loadRecords();
+  const i = records.findIndex(r => r.id === recordId);
+  if (i !== -1) {
+    records[i].futureMeAnswer    = answer;
+    records[i].futureMeAnsweredAt = new Date().toISOString();
+    saveRecords(records);
+  }
+
+  showToast('💬 返事を保存しました');
+  renderTimeline();
+}
+
+/**
+ * 会話詳細パネルを開閉する
+ */
+function toggleConversation(recordId) {
+  const detail = document.getElementById('fm-conv-' + recordId);
+  if (detail) detail.classList.toggle('open');
 }
 
 // ============================================================
@@ -2742,7 +2974,7 @@ function importData(input) {
       const merged = [...current, ...newRecords].sort((a, b) => b.id - a.id);
       const saved  = saveRecords(merged);
 
-      if (!saved) {
+      if (saved !== true) {
         showImportResult('保存に失敗しました。ストレージ容量を確認してください。', true);
         input.value = '';
         return;

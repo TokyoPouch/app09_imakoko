@@ -1,8 +1,11 @@
 {
-  "name": "app07-imakoko",
-  "version": "3.0.0",
+  "name": "app09-imakoko",
+  "version": "5.0.0",
   "description": "いまここ手帳 β — Future Me | 好きを忘れないAI",
   "type": "module",
+  "scripts": {
+    "start": "npx serve . -p 3000"
+  },
   "dependencies": {
     "@google/genai": "^1.3.0"
   },
