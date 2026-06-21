@@ -1985,13 +1985,18 @@ async function reorganizeShelf() {
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
 
+      console.log('[shelf-response]', data);
+      console.log('[shelf-debug] shelfData sent:', shelf);
+      console.log('[shelf-debug] relations count:', data && data.relations ? Object.keys(data.relations).length : 'no relations');
+
       if (data && data.relations && typeof data.relations === 'object') {
         const toSave = {
           relations:  data.relations,
           updatedAt:  new Date().toISOString()
         };
+        console.log('[shelf-saved]', toSave);
         saveShelfRelations(toSave);
-        renderShelfPanel(); // ボタン下に最終更新日時を再描画
+        renderShelfPanel();
         showToast('✨ 棚を再整理しました');
         if (btn) { btn.disabled = false; btn.textContent = '棚を再整理'; }
         return;
@@ -2074,7 +2079,8 @@ function renderShelfPanel() {
   const inner = document.getElementById('shelf-panel-inner');
   if (!inner) return;
 
-  const shelf = getShelf(); // v3.32: entriesが空なら[]
+  const shelf = getShelf();
+  console.log('[shelf-render]', shelf);
   inner.innerHTML = '';
 
   if (!shelf || shelf.length === 0) {
