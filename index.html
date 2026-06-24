@@ -1956,17 +1956,55 @@ function saveShelfRelations(data) {
  */
 // ローカルフォールバック用：テーマ→棚構造を構築
 function buildLocalShelf(themes, allRecords) {
+  const safeRecords = allRecords || [];
+
   return themes.map((theme, si) => {
-    const words = theme.split(/[・、\s\/]+/).filter(w => w.length > 1);
+    const themeWords = theme
+      .split(/[・、\s\/したい続けているを通して向き合っている探求している]+/)
+      .filter(w => w.length > 1)
+      .map(w => w.toLowerCase());
+
+    // このテーマに関連する記録を抽出
+    const relevantRecords = themeWords.length > 0
+      ? safeRecords.filter(r => {
+          const text = ((r.memo || '') + ' ' + (r.location || '') + ' ' + (r.futureMeAnswer || '')).toLowerCase();
+          return themeWords.some(w => text.includes(w));
+        })
+      : [];
+
+    // 関連記録のタグ → 場所 → テーマキーワード の優先順でこの棚固有の本候補を作る
+    const bookSet = new Set();
+    const source = relevantRecords.length > 0 ? relevantRecords : [];
+    for (const r of source) {
+      if (Array.isArray(r.tags)) r.tags.filter(Boolean).forEach(t => bookSet.add(t.trim()));
+      if (r.location) bookSet.add(r.location.trim());
+    }
+
+    // 関連記録がなかった場合: 全記録タグをインデックスでずらして重複を避ける
+    if (bookSet.size === 0) {
+      const allTags = [...new Set(safeRecords.flatMap(r => Array.isArray(r.tags) ? r.tags : []).filter(Boolean))];
+      const allLocations = [...new Set(safeRecords.map(r => r.location || '').filter(Boolean))];
+      const pool = allTags.length > 0 ? allTags : allLocations;
+      if (pool.length > 0) {
+        const start = (si * 3) % pool.length;
+        for (let i = 0; i < 3; i++) bookSet.add(pool[(start + i) % pool.length]);
+      } else {
+        themeWords.slice(0, 3).forEach(w => bookSet.add(w));
+      }
+    }
+
+    const bookCandidates = Array.from(bookSet).slice(0, 5);
+    if (bookCandidates.length === 0) bookCandidates.push('記録');
+
     return {
       title: theme,
-      books: [{
-        id:       'book_' + si + '_0',
-        title:    theme + 'の探索',
-        keywords: words.length > 0 ? words : [theme],
-      }]
+      books: bookCandidates.map((title, bi) => ({
+        id:       'book_' + si + '_' + bi,
+        title,
+        keywords: title.split(/[・、\s\/]+/).filter(w => w.length > 0),
+      }))
     };
-  }).filter(s => s.title);
+  }).filter(s => s.title && s.books.length > 0);
 }
 
 // ローカルフォールバック用：キーワードマッチでrelationsを構築・保存
@@ -2144,13 +2182,19 @@ function toggleAnokoroPanel() {
 // ============================================================
 
 /**
- * 各本の件数を計算する（キーワードマッチ）
+ * 各本の件数を計算する（shelfRelations優先、なければキーワードマッチ）
  */
 function countBookPages(book) {
+  const shelfRelations = loadShelfRelations();
+  if (shelfRelations && shelfRelations.relations) {
+    const bookNameTrimmed = (book.title || '').trim();
+    const ids = shelfRelations.relations[bookNameTrimmed];
+    if (Array.isArray(ids) && ids.length > 0) return ids.length;
+  }
   const records = loadRecords();
   return records.filter(r => {
     const text = ((r.memo || '') + ' ' + (r.url || '')).toLowerCase();
-    return book.keywords.some(kw => text.includes(kw.toLowerCase()));
+    return (book.keywords || []).some(kw => kw && text.includes(kw.toLowerCase()));
   }).length;
 }
 
@@ -2402,15 +2446,22 @@ function renderShelfBookTimeline(book) {
     }
   }
 
+  console.log('[shelf-book-debug] book:', bookNameTrimmed);
+  console.log('[shelf-book-debug] shelfRelations keys:', shelfRelations ? Object.keys(shelfRelations.relations || shelfRelations) : 'none');
+  console.log('[shelf-book-debug] relIdsRaw:', relIdsRaw);
+  console.log('[shelf-book-debug] records count:', records.length, 'sample IDs:', records.slice(0, 3).map(r => String(r.id)));
+
   if (Array.isArray(relIdsRaw) && relIdsRaw.length > 0) {
     // ID を String に統一して Set を作成
     const idSet = new Set(relIdsRaw.map(id => String(id)));
 
     // 記録のIDもString化して照合
     matched = records.filter(r => idSet.has(String(r.id)));
+    console.log('[shelf-book-debug] IDマッチ結果:', matched.length, '件');
   } else {
     // フォールバック: リアルタイム キーワード判定
     matched = records.filter(r => isRecordRelatedToBook(r, book));
+    console.log('[shelf-book-debug] キーワードフォールバック結果:', matched.length, '件');
   }
 
   // 件数を表示

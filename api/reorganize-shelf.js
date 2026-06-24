@@ -87,6 +87,9 @@ export default async function handler(req, res) {
     (s.books || []).map(b => b.title)
   );
 
+  // ── 入力エントリーの有効IDセット（検証用）────────────────────
+  const validEntryIds = new Set((entries || []).map(e => String(e.id)));
+
   // ── Geminiプロンプト ─────────────────────────────────────────
   const userPrompt = `以下のJSONのみを返してください。
 マークダウン（\`\`\`json 等の囲み）・前置き・説明文は一切禁止。
@@ -97,34 +100,30 @@ export default async function handler(req, res) {
 返却する本の名前は、必ず入力された「棚と本」にある名前と完全一致させてください。
 入力された本に存在しない名前を新しく作らないでください。
 
+【重要】記録のIDは必ず入力データの "id" フィールドの値をそのままコピーしてください。
+IDは数字の文字列です（例: "1749681234567"）。絶対に変更・創作しないでください。
+
 【関連付けの考え方】
 
-例：
+例（入力の記録に id:"1749681234567" と id:"1749123456789" がある場合）：
 
 記録：
-福岡県ではんてん作りを見学
+{ "id": "1749681234567", "memo": "福岡県ではんてん作りを見学" }
 
 関連先：
 日本の伝統布
 ミャンマーパンツ
 
-理由：
-はんてん・織物・布文化は、ユーザーの日本の伝統布やミャンマーパンツの活動と関連するため。
-
----
-
-【出力フォーマット】
-
+出力例：
 {
   "relations": {
-    "日本の伝統布": ["entry001", "entry008"],
-    "ミャンマーパンツ": ["entry001"],
-    "AIとの対話": ["entry003"]
+    "日本の伝統布": ["1749681234567"],
+    "ミャンマーパンツ": ["1749681234567"]
   }
 }
 
 ※ 関連する記録がない本はキーを含めないでください。
-※ entryのIDは入力データの id フィールドをそのまま使用してください。
+※ IDは必ず入力データの id フィールドの値をそのまま使用すること。
 
 ---
 
@@ -199,7 +198,7 @@ ${JSON.stringify(entries.slice(0, 50))}`;
 
     // relations を検証・サニタイズ
     // - キー（本のタイトル）が shelfSummary に存在するものだけを残す
-    // - 値は文字列配列であることを保証
+    // - 値は実際の入力エントリーIDと一致するもののみ残す
     const safeRelations = {};
     const bookTitleSet = new Set(shelfSummary);
 
@@ -211,14 +210,29 @@ ${JSON.stringify(entries.slice(0, 50))}`;
           continue;
         }
         if (!Array.isArray(ids)) continue;
-        const validIds = ids.filter(id => typeof id === 'string' && id.trim());
+        // 実際の入力エントリーIDに存在するもののみ有効とする（幻覚ID排除）
+        const validIds = ids
+          .filter(id => typeof id === 'string' && id.trim())
+          .filter(id => validEntryIds.has(id));
         if (validIds.length > 0) {
           safeRelations[bookTitle] = validIds;
+        } else if (ids.length > 0) {
+          console.warn(`[reorganize-shelf] "${bookTitle}": Geminiが返したID ${JSON.stringify(ids)} は入力エントリーに存在しない → スキップ`);
         }
       }
     }
 
-    console.log('[reorganize-shelf] Gemini success, books matched:', Object.keys(safeRelations).length);
+    const matchedCount = Object.keys(safeRelations).length;
+    console.log('[reorganize-shelf] Gemini success, books matched:', matchedCount);
+    console.log('[reorganize-shelf] validEntryIds count:', validEntryIds.size);
+
+    // Geminiが有効な関連を返せなかった場合はローカルフォールバック
+    if (matchedCount === 0 && validEntryIds.size > 0) {
+      console.warn('[reorganize-shelf] Geminiの関連が空 → ローカルキーワードフォールバック');
+      const fallbackRelations = buildLocalRelations(shelfData, entries);
+      return res.status(200).json({ relations: fallbackRelations });
+    }
+
     return res.status(200).json({ relations: safeRelations });
 
   } catch (err) {
